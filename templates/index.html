@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Carte des appareils volés</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- 1. Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+
+  <!-- 2. Font Awesome (map-pin) pour l’icône de localisation -->
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"
+    integrity="sha512-1ycn6IcaQQ40/MKBW2W4Rhis/DbILU74C1vSrLJxCq57o941Ym01SwNsOMqvEBFlcgUa6xLiPY/NS5R+E6ztJQ=="
+    crossorigin="anonymous"
+    referrerpolicy="no-referrer"
+  />
+
+  <style>
+    /* 1. Document prend 100% en hauteur, pas de marges */
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+
+    /* 2. Sidebar agrandi à 350px, défilement vertical si nécessaire */
+    #sidebar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 350px;            /* largeur du panneau latéral */
+      background: #f8f9fa;
+      border-right: 1px solid #ddd;
+      overflow-y: auto;        /* scroll vertical si trop d’entrées */
+      z-index: 1000;
+      padding: 10px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* 3. Barre de recherche en haut du sidebar */
+    #search-input {
+      width: 100%;
+      padding: 6px 8px;
+      margin-bottom: 10px;
+      font-size: 0.95em;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+
+    /* 4. Titre du sidebar */
+    h2 {
+      font-size: 1.2em;
+      margin: 0 0 10px 0;
+    }
+
+    /* 5. Conteneur de la liste doit grandir pour occuper l’espace restant */
+    #device-list {
+      flex-grow: 1;
+      overflow-y: auto;
+    }
+
+    /* 6. Style pour chaque entrée d’appareil */
+    .device-entry {
+      margin-bottom: 8px;
+      padding: 8px 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      background: #fff;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .device-info {
+      font-size: 0.9em;
+      line-height: 1.2em;
+      display: flex;
+      align-items: center;
+      max-width: 200px;        /* pour limiter le débordement */
+    }
+
+    /* 7. Texte interne */
+    .device-info .device-id {
+      font-weight: bold;
+      margin-left: 4px; /* pour séparer du pin */
+    }
+
+    .device-info .device-name,
+    .device-info .device-model {
+      font-style: italic;
+      color: #555;
+    }
+
+    .device-info .last-seen {
+      font-size: 0.8em;
+      color: #777;
+      margin-top: 4px;
+    }
+
+    /* 8. Bouton “rafraîchir” */
+    .refresh-button {
+      background: #007bff;
+      color: #fff;
+      border: none;
+      border-radius: 3px;
+      padding: 4px 6px;
+      cursor: pointer;
+      font-size: 0.9em;
+      flex-shrink: 0;
+    }
+
+    .refresh-button:hover {
+      background: #0056b3;
+    }
+
+    /* 9. Style input de focus/hover */
+    #search-input:focus {
+      outline: none;
+      border-color: #007bff;
+      box-shadow: 0 0 2px rgba(0,123,255,0.5);
+    }
+
+    /* 10. Carte commence après le sidebar */
+    #map {
+      position: absolute;
+      top: 0;
+      left: 350px;
+      right: 0;
+      bottom: 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="sidebar">
+    <h2>Appareils volés</h2>
+
+    <!-- Barre de recherche -->
+    <input type="text" id="search-input" placeholder="Rechercher… (ID ou nom)" />
+
+    <!-- Conteneur des entrées d’appareil -->
+    <div id="device-list">
+      Chargement…
+    </div>
+  </div>
+  <div id="map"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    // --- INITIALISATION DE LA CARTE ---
+    const map = L.map('map').setView([46.8, 2.5], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    const markers = {}; // deviceId -> marker Leaflet
+
+    // --- FONCTION UTILE : formate la date ISO en français "dd/mm/yyyy hh:mm" ---
+    function formatDateFr(isoString) {
+      try {
+        const d = new Date(isoString);
+        const day   = String(d.getDate()).padStart(2, '0');
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const year  = d.getFullYear();
+        const hours   = String(d.getHours()).padStart(2, '0');
+        const minutes = String(d.getMinutes()).padStart(2, '0');
+        return `${day}/${month}/${year} ${hours}:${minutes}`;
+      } catch {
+        return '—';
+      }
+    }
+
+    // --- RÉCUPÉRER LA LISTE DES APPAREILS VOLÉS ---
+    async function fetchDevicesList() {
+      const resp = await fetch('/api/devices');
+      if (!resp.ok) throw new Error('Erreur /api/devices');
+      return await resp.json();
+      // renvoie : [ { deviceId, deviceName, deviceModelKind }, … ]
+    }
+
+    // --- RÉCUPÉRER TOUTES LES LOCALISATIONS ---
+    async function fetchAllLocations() {
+      const resp = await fetch('/api/locations');
+      if (!resp.ok) throw new Error('Erreur /api/locations');
+      return await resp.json();
+      // renvoie : [ { deviceId, latitude, longitude, lastUpdate }, … ]
+    }
+
+    // --- CRÉER OU METTRE À JOUR UN MARQUEUR SUR LA CARTE ---
+    function addOrMoveMarker(deviceId, lat, lon, lastUpdate) {
+      if (markers[deviceId]) {
+        markers[deviceId].setLatLng([lat, lon]);
+        markers[deviceId].getPopup().setContent(`
+          <b>${deviceId}</b><br>
+          Mis à jour : ${lastUpdate}
+        `);
+      } else {
+        const m = L.marker([lat, lon]).addTo(map);
+        m.bindPopup(`
+          <b>${deviceId}</b><br>
+          Mis à jour : ${lastUpdate}
+        `);
+        markers[deviceId] = m;
+      }
+    }
+
+    // --- GÉRER LE RENDU DU VOLET LATÉRAL ---
+    let allDevicesCached = [];   // stocke temporairement la liste enrichie (avec lastSeen)
+    function renderDeviceList(devices) {
+      const container = document.getElementById('device-list');
+      container.innerHTML = ''; // vide le “Chargement…”
+
+      devices.forEach(dev => {
+        const { deviceId, deviceName, deviceModelKind, lastSeen, hasLocation } = dev;
+
+        const entry = document.createElement('div');
+        entry.className = 'device-entry';
+        entry.dataset.deviceId = deviceId;        // pour le filtrage
+
+        // DIV d’info (icône pin si localisé + ID + nom + modèle + dernière vue)
+        const info = document.createElement('div');
+        info.className = 'device-info';
+
+        // Ajouter l’icône “pin” uniquement si “hasLocation” est true
+        let iconHtml = '';
+        if (hasLocation) {
+          iconHtml = '<i class="fas fa-map-pin" style="color: #d00;"></i>';
+        }
+
+        info.innerHTML = `
+          ${iconHtml}
+          <div>
+            <div class="device-id">${deviceId}</div>
+            <div class="device-name">${deviceName || '<i>Nom inconnu</i>'}</div>
+            <div class="device-model">${deviceModelKind || '<i>Modèle inconnu</i>'}</div>
+            <div class="last-seen">Dernière vue : ${lastSeen || '—'}</div>
+          </div>
+        `;
+
+        // Bouton de rafraîchissement
+        const btn = document.createElement('button');
+        btn.className = 'refresh-button';
+        btn.innerText = '↻';
+        btn.title = 'Forcer la mise à jour';
+
+        btn.onclick = async () => {
+          btn.disabled = true;
+          btn.innerText = '⟳…';
+          try {
+            const resp = await fetch(`/api/refresh/${deviceId}`, { method: 'POST' });
+            const payload = await resp.json();
+            if (!resp.ok) {
+              throw new Error(payload.error || 'Erreur inconnue');
+            }
+            const { latitude, longitude, lastUpdate } = payload;
+            const formatted = formatDateFr(lastUpdate);
+            addOrMoveMarker(deviceId, latitude, longitude, formatted);
+
+            // Mettre à jour le champ “lastSeen” et l’icône pin
+            entry.querySelector('.last-seen').innerText = `Dernière vue : ${formatted}`;
+            if (!hasLocation) {
+              // ajouter l’icône pin (pour refléter la nouvelle localisation)
+              entry.querySelector('.device-info').insertAdjacentHTML(
+                'afterbegin',
+                '<i class="fas fa-map-pin" style="color: #d00;"></i>'
+              );
+              dev.hasLocation = true; // mettre à jour en cache
+            }
+
+            // Mettre à jour en cache et resortir la liste
+            const idx = allDevicesCached.findIndex(d => d.deviceId === deviceId);
+            if (idx !== -1) {
+              allDevicesCached[idx].lastSeen = formatted;
+              allDevicesCached[idx].hasLocation = true;
+              // Re-trier + re-render après le refresh
+              const sorted = allDevicesCached.sort((a,b) => {
+                if (!a.rawLastSeen && !b.rawLastSeen) return 0;
+                if (!a.rawLastSeen) return 1;
+                if (!b.rawLastSeen) return -1;
+                return new Date(b.rawLastSeen) - new Date(a.rawLastSeen);
+              });
+              renderDeviceList(sorted);
+              applyFilter(document.getElementById('search-input').value.trim());
+            }
+          } catch (err) {
+            console.error(`Impossible de rafraîchir ${deviceId} :`, err);
+            alert(`Erreur de localisation pour ${deviceId}\n${err.message}`);
+          } finally {
+            btn.disabled = false;
+            btn.innerText = '↻';
+          }
+        };
+
+        entry.appendChild(info);
+        entry.appendChild(btn);
+        container.appendChild(entry);
+      });
+    }
+
+    // --- APPLIE LE FILTRE DE RECHERCHE (partiel/littéral) ---
+    function applyFilter(text) {
+      text = text.toLowerCase();
+      document.querySelectorAll('.device-entry').forEach(entry => {
+        const id   = entry.dataset.deviceId.toLowerCase();
+        const name = entry.querySelector('.device-name')?.innerText.toLowerCase() || '';
+        if (id.includes(text) || name.includes(text)) {
+          entry.style.display = 'flex';
+        } else {
+          entry.style.display = 'none';
+        }
+      });
+    }
+
+    // --- INITIALISATION GLOBALE ---
+    async function init() {
+      try {
+        // 1. Récupérer liste des appareils volés
+        const devices = await fetchDevicesList(); 
+        // devices = [{ deviceId, deviceName, deviceModelKind }, ...]
+
+        // 2. Récupérer toutes les localisations (avec “lastUpdate”)
+        const locations = await fetchAllLocations(); 
+        // locations = [{ deviceId, latitude, longitude, lastUpdate }, ...]
+
+        // 3. Combiner appareils + “lastSeen” + “hasLocation”
+        const locMap = {};
+        locations.forEach(loc => {
+          locMap[loc.deviceId] = loc.lastUpdate;
+        });
+
+        const enriched = devices.map(dev => {
+          const rawLast = locMap[dev.deviceId] || null;
+          return {
+            ...dev,
+            rawLastSeen: rawLast,                          // date ISO brute (pour trier)
+            lastSeen: rawLast ? formatDateFr(rawLast) : '',// date FR formattée
+            hasLocation: rawLast !== null                  // true si on a déjà une localisation
+          };
+        });
+
+        // 4. Trier par date “rawLastSeen” descendant (les plus récents en haut)
+        enriched.sort((a, b) => {
+          if (!a.rawLastSeen && !b.rawLastSeen) return 0;
+          if (!a.rawLastSeen) return 1;
+          if (!b.rawLastSeen) return -1;
+          return new Date(b.rawLastSeen) - new Date(a.rawLastSeen);
+        });
+
+        // Stocker en cache global
+        allDevicesCached = enriched;
+
+        // 5. Afficher le volet latéral
+        renderDeviceList(enriched);
+
+        // 6. Placer les marqueurs initiaux sur la carte
+        enriched.forEach(dev => {
+          if (dev.hasLocation) {
+            const loc = locations.find(l => l.deviceId === dev.deviceId);
+            addOrMoveMarker(dev.deviceId, loc.latitude, loc.longitude, dev.lastSeen);
+          }
+        });
+
+        // 7. Lier la barre de recherche pour filtrer à la volée
+        const searchInput = document.getElementById('search-input');
+        searchInput.addEventListener('input', () => {
+          applyFilter(searchInput.value.trim());
+        });
+
+      } catch (err) {
+        console.error('Erreur initialisation :', err);
+        document.getElementById('device-list').innerText = 'Erreur de chargement';
+      }
+    }
+
+    // --- MISE À JOUR PÉRIODIQUE (10 secondes) ---
+    async function periodicUpdate() {
+      try {
+        const devices = await fetchDevicesList();
+        const locations = await fetchAllLocations();
+
+        const locMap = {};
+        locations.forEach(loc => {
+          locMap[loc.deviceId] = loc.lastUpdate;
+        });
+
+        // Recréer enriched + tri
+        const enriched = devices.map(dev => {
+          const rawLast = locMap[dev.deviceId] || null;
+          return {
+            ...dev,
+            rawLastSeen: rawLast,
+            lastSeen: rawLast ? formatDateFr(rawLast) : '',
+            hasLocation: rawLast !== null
+          };
+        }).sort((a, b) => {
+          if (!a.rawLastSeen && !b.rawLastSeen) return 0;
+          if (!a.rawLastSeen) return 1;
+          if (!b.rawLastSeen) return -1;
+          return new Date(b.rawLastSeen) - new Date(a.rawLastSeen);
+        });
+
+        allDevicesCached = enriched;
+        renderDeviceList(enriched);
+
+        enriched.forEach(dev => {
+          if (dev.hasLocation) {
+            const loc = locations.find(l => l.deviceId === dev.deviceId);
+            addOrMoveMarker(dev.deviceId, loc.latitude, loc.longitude, dev.lastSeen);
+          } else {
+            // enlever le marqueur si plus de localisation
+            if (markers[dev.deviceId]) {
+              map.removeLayer(markers[dev.deviceId]);
+              delete markers[dev.deviceId];
+            }
+          }
+        });
+
+        // Réappliquer le filtre si nécessaire
+        const currentFilter = document.getElementById('search-input').value.trim();
+        if (currentFilter) applyFilter(currentFilter);
+
+      } catch (err) {
+        console.error('Erreur mise à jour périodique :', err);
+      }
+    }
+
+    // --- LANCEMENT ---
+    init();
+    setInterval(periodicUpdate, 600000); // auto-refresh every ten minutes
+  </script>
+</body>
+</html>

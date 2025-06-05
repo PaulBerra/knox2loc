@@ -1,0 +1,11 @@
+gunicorn
+requests
+smtplib
+datetime
+email
+math
+Flask
+json
+time
+os
+sys
