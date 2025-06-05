@@ -89,7 +89,8 @@ def get_voles_devices_full():
                     voles.append({
                         "deviceId": dev.get("deviceId"),
                         "deviceName": dev.get("userName"),         # correspond à mobileId
-                        "deviceModelKind": dev.get("deviceModel") # modèle du téléphone
+                        "deviceModelKind": dev.get("deviceModel"), # modèle du téléphone
+                        "imei": dev.get("imei")                    # IMEI du téléphone
                     })
                     break
 
