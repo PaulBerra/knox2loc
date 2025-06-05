@@ -1,0 +1,14 @@
+{
+"userID_full": "<client_id>@<tenant_id>", // Knox Api user
+"client_secret": "<Knox_client_secret>",  // Knox Api Secret
+"smtp_server": "smtp.example.com",
+"smtp_port": 587,
+"smtp_user": "alert@yourcompany.com",
+"smtp_password": "<SMTP_password>",
+"email_to": "security@yourcompany.com",
+"tagVol": "stolen",                      // tag extracted from tagValue to identify stolen but non-blocked phones
+"lat": "XXX",                            // coordinate of your juridiction (fast cops action)
+"lon": "XXX",                            // coordinate of your juridiction (fast cops action)
+"refresh": "120",                        // delay between refreshs
+"radius": "10"                           // radius of attention around lat / lon
+}
