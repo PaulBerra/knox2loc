@@ -7,7 +7,7 @@
 These two scripts work together to provide real-time monitoring and alerting for stolen corporate mobile devices via the Knox API, as well as a web-based interface for visualizing their locations.
 
 * **Email Alert Script**: Runs continuously in the background to detect when any device tagged as "stolen" reconnects to the network. Upon detection, it sends an HTML email notification with relevant details (timestamp, location, device info) to a designated security team.
-* **Web Interface (Flask)**: Offers a dynamic, map-based dashboard listing all stolen devices and their current locations. It polls the Knox API periodically to update device positions (every 10 seconds by default) and allows manual refreshes for individual devices.
+* **Web Interface (Flask)**: Offers a dynamic, map-based dashboard listing all stolen devices and their current locations. It polls the Knox API periodically to update device positions (every 10 min by default) and allows manual refreshes for individual devices.
 
 ---
 
