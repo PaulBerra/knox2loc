@@ -1,6 +1,3 @@
-**knox2loc Documentation**
-
-
 ![image](https://github.com/user-attachments/assets/2facff1d-3db9-4dc1-9d4d-e228ded6361d)
 
 
